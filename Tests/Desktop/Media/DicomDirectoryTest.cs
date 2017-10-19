@@ -18,6 +18,8 @@ namespace Dicom.Media
     {
         #region Unit tests
 
+        private const string SrDocDicomDirFilePath = @".\Test Data\SrDocDicomDir";
+
         [Fact]
         public void Open_DicomDirFile_Succeeds()
         {
@@ -90,7 +92,7 @@ namespace Dicom.Media
             var dicomDir = new DicomDirectory();
             foreach (var dicomFile in dicomFiles)
             {
-                dicomDir.AddFile(dicomFile);
+                dicomDir.AddFile(dicomFile, RecordTypeName.Image);
             }
 
             var imageNodes = dicomDir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
@@ -130,6 +132,264 @@ namespace Dicom.Media
             }
 
             return dicomFiles;
+        }
+
+        [Fact]
+        public void AddFile_SrDoc_Succeeds()
+        {
+            ClearSrDocDicomDirFile();
+
+            var srDocFileCount = Directory.GetFiles(@".\Test Data", "SrDoc*").Length;
+            var srDocDicomFiles = GetSrDocDicomFiles();
+            var dicomdir = new DicomDirectory();
+
+            foreach (var dicomFile in srDocDicomFiles.Values)
+            {
+                dicomdir.AddFile(dicomFile, RecordTypeName.SrDocument);
+            }
+
+            var srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                .LowerLevelDirectoryRecordCollection.Count();
+            Assert.Equal(srDocFileCount, srDocRecordCount);
+
+            dicomdir.Save(SrDocDicomDirFilePath);
+            dicomdir = DicomDirectory.Open(SrDocDicomDirFilePath);
+
+            srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                .LowerLevelDirectoryRecordCollection.Count();
+            Assert.Equal(srDocFileCount, srDocRecordCount);
+        }
+
+        [Fact]
+        public void Find_SrDoc_Succeeds()
+        {
+            ClearSrDocDicomDirFile();
+
+            var srDocDicomFiles = GetSrDocDicomFiles();
+            var dicomdir = new DicomDirectory();
+
+            foreach (var dicomFile in srDocDicomFiles.Values)
+            {
+                dicomdir.AddFile(dicomFile, RecordTypeName.SrDocument);
+            }
+
+            var seriesRecord = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord;
+
+            foreach (var sopInstanceUid in srDocDicomFiles.Keys)
+            {
+                var srDocRecord = dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, sopInstanceUid);
+                Assert.NotEqual(null, srDocRecord);
+            }
+        }
+
+        [Fact]
+        public void Remove_FirstSrDocRecord_Succeeds()
+        {
+            ClearSrDocDicomDirFile();
+
+            var srDocFiles = GetSrDocDicomFiles();
+            DicomDirectory dicomdir = new DicomDirectory();
+
+            foreach (var dicomFile in srDocFiles.Values)
+            {
+                dicomdir.AddFile(dicomFile, RecordTypeName.SrDocument);
+            }
+
+            var firstSrDocRecordSopInstanceUid = srDocFiles.Keys.First();
+            var seriesRecord = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord;
+            DicomDirectoryRecord previousRecord = null;
+            DicomDirectoryRecord firstSrDocRecord = null;
+
+            dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, firstSrDocRecordSopInstanceUid,
+                out firstSrDocRecord, out previousRecord);
+
+            dicomdir.Remove(firstSrDocRecord, previousRecord, seriesRecord);
+
+            var srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                  .LowerLevelDirectoryRecordCollection.Count();
+            firstSrDocRecord = dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, firstSrDocRecordSopInstanceUid);
+            
+            Assert.Equal(null, firstSrDocRecord);
+            Assert.Equal(4, srDocRecordCount);
+
+            dicomdir.Save(SrDocDicomDirFilePath);
+            dicomdir = DicomDirectory.Open(SrDocDicomDirFilePath);
+
+            srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                   .LowerLevelDirectoryRecordCollection.Count();
+            firstSrDocRecord = dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, firstSrDocRecordSopInstanceUid);
+
+            Assert.Equal(null, firstSrDocRecord);
+            Assert.Equal(4, srDocRecordCount);
+        }
+
+        [Fact]
+        public void Remove_OneSrDocRecord_Succeeds()
+        {
+            ClearSrDocDicomDirFile();
+
+            var srDocFiles = GetSrDocDicomFiles();
+            DicomDirectory dicomdir = new DicomDirectory();
+
+            foreach (var dicomFile in srDocFiles.Values)
+            {
+                dicomdir.AddFile(dicomFile, RecordTypeName.SrDocument);
+            }
+
+            var oneSrDocRecordSopInstanceUid = srDocFiles.Keys.ElementAt(2);
+            var seriesRecord = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord;
+            DicomDirectoryRecord previousRecord = null;
+            DicomDirectoryRecord oneSrDocRecord = null;
+            dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, oneSrDocRecordSopInstanceUid,
+                out oneSrDocRecord, out previousRecord);
+
+            dicomdir.Remove(oneSrDocRecord, previousRecord, seriesRecord);
+            var srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                   .LowerLevelDirectoryRecordCollection.Count();
+            oneSrDocRecord = dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, oneSrDocRecordSopInstanceUid);
+
+            Assert.Equal(null, oneSrDocRecord);
+            Assert.Equal(4, srDocRecordCount);
+
+            dicomdir.Save(SrDocDicomDirFilePath);
+            dicomdir = DicomDirectory.Open(SrDocDicomDirFilePath);
+
+            srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                   .LowerLevelDirectoryRecordCollection.Count();
+            oneSrDocRecord = dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, oneSrDocRecordSopInstanceUid);
+
+            Assert.Equal(null, oneSrDocRecord);
+            Assert.Equal(4, srDocRecordCount);
+        }
+
+        [Fact]
+        public void Remove_LastSrDocRecord_Succeeds()
+        {
+            ClearSrDocDicomDirFile();
+
+            var srDocFiles = GetSrDocDicomFiles();
+            DicomDirectory dicomdir = new DicomDirectory();
+
+            foreach (var dicomFile in srDocFiles.Values)
+            {
+                dicomdir.AddFile(dicomFile, RecordTypeName.SrDocument);
+            }
+
+            var lastSrDocRecordSopInstanceUid = srDocFiles.Keys.Last();
+            var seriesRecord = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord;
+
+            DicomDirectoryRecord previousRecord = null;
+            DicomDirectoryRecord lastSrDocRecord = null;
+            dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, lastSrDocRecordSopInstanceUid,
+                out lastSrDocRecord, out previousRecord);
+
+            dicomdir.Remove(lastSrDocRecord, previousRecord, seriesRecord);
+            var srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                   .LowerLevelDirectoryRecordCollection.Count();
+            lastSrDocRecord = dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, lastSrDocRecordSopInstanceUid);
+
+            Assert.Equal(null, lastSrDocRecord);
+            Assert.Equal(4, srDocRecordCount);
+
+            dicomdir.Save(SrDocDicomDirFilePath);
+            dicomdir = DicomDirectory.Open(SrDocDicomDirFilePath);
+
+            srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                   .LowerLevelDirectoryRecordCollection.Count();
+            lastSrDocRecord = dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, lastSrDocRecordSopInstanceUid);
+
+            Assert.Equal(null, lastSrDocRecord);
+            Assert.Equal(4, srDocRecordCount);
+        }
+
+        [Fact]
+        public void Remove_AllSrDocRecords_Succeeds()
+        {
+            ClearSrDocDicomDirFile();
+
+            var srDocFiles = GetSrDocDicomFiles();
+            DicomDirectory dicomdir = new DicomDirectory();
+
+            foreach (var dicomFile in srDocFiles.Values)
+            {
+                dicomdir.AddFile(dicomFile, RecordTypeName.SrDocument);
+            }
+
+            var seriesRecord = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord;
+
+            foreach (var oneSrDocRecordSopInstanceUid in srDocFiles.Keys)
+            {
+                DicomDirectoryRecord previousRecord = null;
+                DicomDirectoryRecord oneSrDocRecord = null;
+                dicomdir.Find(DicomTag.ReferencedSOPInstanceUIDInFile, seriesRecord, oneSrDocRecordSopInstanceUid,
+                    out oneSrDocRecord, out previousRecord);
+
+                dicomdir.Remove(oneSrDocRecord, previousRecord, seriesRecord);
+            }
+
+            var srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                .LowerLevelDirectoryRecordCollection.Count();
+            Assert.Equal(0, srDocRecordCount);
+
+            dicomdir.Save(SrDocDicomDirFilePath);
+            dicomdir = DicomDirectory.Open(SrDocDicomDirFilePath);
+
+            srDocRecordCount = dicomdir.RootDirectoryRecord.LowerLevelDirectoryRecord.LowerLevelDirectoryRecord
+                .LowerLevelDirectoryRecordCollection.Count();
+            Assert.Equal(0, srDocRecordCount);
+        }
+
+        [Fact]
+        public void Remove_UniquePatient_Succeeds()
+        {
+            ClearSrDocDicomDirFile();
+
+            var patientId = "T000002";
+            var srDocFiles = GetSrDocDicomFiles();
+            DicomDirectory dicomdir = new DicomDirectory();
+
+            dicomdir.AddFile(srDocFiles.Values.First(), RecordTypeName.SrDocument);
+
+            DicomDirectoryRecord previousRecord = null;
+            DicomDirectoryRecord patientRecord = null;
+            dicomdir.Find(DicomTag.PatientID, dicomdir, patientId, out patientRecord, out previousRecord);
+            dicomdir.Remove(patientRecord, previousRecord, dicomdir);
+
+            var patientRecords = dicomdir.RootDirectoryRecordCollection;
+            patientRecord = dicomdir.Find(DicomTag.PatientID, dicomdir, patientId);
+
+            Assert.Equal(null, patientRecord);
+            Assert.Equal(null, patientRecords);
+
+            dicomdir.Save(SrDocDicomDirFilePath);
+            dicomdir = DicomDirectory.Open(SrDocDicomDirFilePath);
+
+            patientRecords = dicomdir.RootDirectoryRecordCollection;
+            patientRecord = dicomdir.Find(DicomTag.PatientID, dicomdir, patientId);
+
+            Assert.Equal(null, patientRecord);
+            Assert.Equal(null, patientRecords);
+        }
+
+        private static IDictionary<string, DicomFile> GetSrDocDicomFiles()
+        {
+            var dicomFiles = new Dictionary<string, DicomFile>();
+
+            foreach (var file in Directory.GetFiles(@".\Test Data", "SrDoc*"))
+            {
+                var dicomFile = DicomFile.Open(file);
+                dicomFiles.Add(dicomFile.Dataset.Get<string>(DicomTag.SOPInstanceUID), dicomFile);
+            }
+
+            return dicomFiles;
+        }
+
+        private static void ClearSrDocDicomDirFile()
+        {
+            if (File.Exists(SrDocDicomDirFilePath))
+            {
+                File.Delete(SrDocDicomDirFilePath);
+            }
         }
 
         #endregion

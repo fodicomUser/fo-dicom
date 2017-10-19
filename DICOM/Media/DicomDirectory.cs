@@ -442,20 +442,105 @@ namespace Dicom.Media
         /// Add new file to DICOM directory.
         /// </summary>
         /// <param name="dicomFile">DICOM file to add.</param>
+        /// <param name="recordTypeName">Record type name.</param>
         /// <param name="referencedFileId">Referenced file ID.</param>
-        public void AddFile(DicomFile dicomFile, string referencedFileId = "")
+        public void AddFile(DicomFile dicomFile, string recordTypeName, string referencedFileId = "")
         {
             if (dicomFile == null) throw new ArgumentNullException(nameof(dicomFile));
 
-            this.AddNewRecord(dicomFile.FileMetaInfo, dicomFile.Dataset, referencedFileId);
+            this.AddNewRecord(dicomFile.FileMetaInfo, dicomFile.Dataset, referencedFileId, recordTypeName);
         }
 
-        private void AddNewRecord(DicomFileMetaInformation metaFileInfo, DicomDataset dataset, string referencedFileId)
+        private void AddNewRecord(DicomFileMetaInformation metaFileInfo, DicomDataset dataset, string referencedFileId, string recordTypeName)
         {
             var patientRecord = this.CreatePatientRecord(dataset);
             var studyRecord = this.CreateStudyRecord(dataset, patientRecord);
             var seriesRecord = this.CreateSeriesRecord(dataset, studyRecord);
-            CreateImageRecord(metaFileInfo, dataset, seriesRecord, referencedFileId);
+
+            switch (recordTypeName)
+            {
+                case RecordTypeName.Image:
+                    CreateImageRecord(metaFileInfo, dataset, seriesRecord, referencedFileId);
+                    break;
+                case RecordTypeName.SrDocument:
+                    CreateSrDocumentRecord(metaFileInfo, dataset, seriesRecord, referencedFileId);
+                    break;
+            }
+            
+        }
+
+        private DicomDirectoryRecord FindFirstChildRecord(string recordTypeName, object parent)
+        {
+            DicomDirectoryRecordCollection lowerLevelRecords = null;
+            DicomDirectoryRecord firstChildRecord = null;
+
+            if (parent is DicomDirectory)
+            {
+                lowerLevelRecords = ((DicomDirectory) parent).RootDirectoryRecordCollection;
+            }
+            else if (parent is DicomDirectoryRecord)
+            {
+                lowerLevelRecords = ((DicomDirectoryRecord) parent).LowerLevelDirectoryRecordCollection;
+            }
+
+            if (lowerLevelRecords != null)
+            {
+                firstChildRecord = lowerLevelRecords.FirstOrDefault((lowerLevelRecord) =>
+                {
+                    bool result = (recordTypeName == lowerLevelRecord.Get<string>(DicomTag.DirectoryRecordType, null));
+                    return result;
+                });
+            }
+
+            return firstChildRecord;
+        }
+
+        private void CreateSrDocumentRecord(
+            DicomFileMetaInformation metaFileInfo,
+            DicomDataset dataset,
+            DicomDirectoryRecord seriesRecord,
+            string referencedFileId)
+        {
+            var currentSrDocument = FindFirstChildRecord(RecordTypeName.SrDocument, seriesRecord);
+            var srDocumentInstanceUid = dataset.Get<string>(DicomTag.SOPInstanceUID);
+
+            while (currentSrDocument != null)
+            {
+                if (currentSrDocument.Get<string>(DicomTag.ReferencedSOPInstanceUIDInFile) == srDocumentInstanceUid)
+                {
+                    return;
+                }
+
+                var nextRecord = currentSrDocument.NextDirectoryRecord;
+                if (nextRecord != null && (RecordTypeName.SrDocument == nextRecord.Get<string>(DicomTag.DirectoryRecordType)))
+                {
+                    currentSrDocument = currentSrDocument.NextDirectoryRecord;
+                }
+                else
+                {
+                    //no more sr document records, break the loop
+                    break;
+                }
+            }
+
+            var newSrDocument = CreateRecordSequenceItem(DicomDirectoryRecordType.SRDocument, dataset);
+            newSrDocument.AddOrUpdate(DicomTag.ReferencedFileID, referencedFileId);
+            newSrDocument.AddOrUpdate(DicomTag.ReferencedSOPClassUIDInFile, metaFileInfo.MediaStorageSOPClassUID.UID);
+            newSrDocument.AddOrUpdate(DicomTag.ReferencedSOPInstanceUIDInFile, metaFileInfo.MediaStorageSOPInstanceUID.UID);
+            newSrDocument.AddOrUpdate(DicomTag.ReferencedTransferSyntaxUIDInFile, metaFileInfo.TransferSyntax.UID);
+            newSrDocument.AddOrUpdate(DicomTag.CompletionFlag, "COMPLETE");
+            newSrDocument.AddOrUpdate(DicomTag.VerificationFlag, "UNVERIFIED");
+
+            if (currentSrDocument != null)
+            {
+                //sr document not found under series record
+                currentSrDocument.NextDirectoryRecord = newSrDocument;
+            }
+            else
+            {
+                //no sr document record found under series record
+                seriesRecord.LowerLevelDirectoryRecord = newSrDocument;
+            }
         }
 
         private void CreateImageRecord(
@@ -464,7 +549,7 @@ namespace Dicom.Media
             DicomDirectoryRecord seriesRecord,
             string referencedFileId)
         {
-            var currentImage = seriesRecord.LowerLevelDirectoryRecord;
+            var currentImage = FindFirstChildRecord(RecordTypeName.Image, seriesRecord);
             var imageInstanceUid = dataset.Get<string>(DicomTag.SOPInstanceUID);
 
 
@@ -475,13 +560,14 @@ namespace Dicom.Media
                     return;
                 }
 
-                if (currentImage.NextDirectoryRecord != null)
+                var nextRecord = currentImage.NextDirectoryRecord;
+                if (nextRecord != null && (RecordTypeName.Image == nextRecord.Get<string>(DicomTag.DirectoryRecordType)))
                 {
                     currentImage = currentImage.NextDirectoryRecord;
                 }
                 else
                 {
-                    //no more patient records, break the loop
+                    //no more image records, break the loop
                     break;
                 }
             }
@@ -493,12 +579,12 @@ namespace Dicom.Media
 
             if (currentImage != null)
             {
-                //study not found under patient record
+                //image not found under series record
                 currentImage.NextDirectoryRecord = newImage;
             }
             else
             {
-                //no studies record found under patient record
+                //no image record found under series record
                 seriesRecord.LowerLevelDirectoryRecord = newImage;
             }
         }
@@ -522,7 +608,7 @@ namespace Dicom.Media
                 }
                 else
                 {
-                    //no more patient records, break the loop
+                    //no more series records, break the loop
                     break;
                 }
             }
@@ -560,7 +646,7 @@ namespace Dicom.Media
                 }
                 else
                 {
-                    //no more patient records, break the loop
+                    //no more study records, break the loop
                     break;
                 }
             }
@@ -686,6 +772,79 @@ namespace Dicom.Media
             if (recordItem.LowerLevelDirectoryRecord != null) AddDirectoryRecordsToSequenceItem(recordItem.LowerLevelDirectoryRecord);
 
             if (recordItem.NextDirectoryRecord != null) AddDirectoryRecordsToSequenceItem(recordItem.NextDirectoryRecord);
+        }
+
+        public DicomDirectoryRecord Find(DicomTag tagInRecord, object container, string tagValueInDicomFile)
+        {
+            DicomDirectoryRecord foundRecord = null;
+            DicomDirectoryRecord previousRecord = null;
+
+            Find(tagInRecord, container, tagValueInDicomFile, out foundRecord, out previousRecord);
+
+            return foundRecord;
+        }
+
+        public void Find(DicomTag tagInRecord, object container, string tagValueInDicomFile, out DicomDirectoryRecord foundRecord, out DicomDirectoryRecord previousRecord)
+        {
+            foundRecord = null;
+            previousRecord = null;
+            DicomDirectoryRecordCollection lowerLevelRecords = null;
+
+            if (container is DicomDirectory)
+            {
+                lowerLevelRecords = ((DicomDirectory) container).RootDirectoryRecordCollection;
+            }
+            else
+            {
+                lowerLevelRecords = ((DicomDirectoryRecord) container).LowerLevelDirectoryRecordCollection;
+            }
+
+            if (!string.IsNullOrEmpty(tagValueInDicomFile))
+            {
+                foreach (var lowerLevelRecord in lowerLevelRecords)
+                {
+                    string tagValueInRecord = lowerLevelRecord.Get<string>(tagInRecord, null);
+
+                    if (tagValueInDicomFile == tagValueInRecord)
+                    {
+                        foundRecord = lowerLevelRecord;
+                        break;
+                    }
+
+                    previousRecord = lowerLevelRecord;
+                }
+            }
+        }
+
+        public void Remove(DicomDirectoryRecord childRecord, DicomDirectoryRecord previousRecord, object parent)
+        {
+            if (previousRecord == null)
+            {
+                RemoveFirstChild(parent);
+            }
+            else
+            {
+                previousRecord.NextDirectoryRecord = childRecord.NextDirectoryRecord;
+            }
+        }
+
+        private void RemoveFirstChild(object parent)
+        {
+            var record = parent as DicomDirectoryRecord;
+            if (record != null)
+            {
+                record.LowerLevelDirectoryRecord = record.LowerLevelDirectoryRecord.NextDirectoryRecord;
+                return;
+            }
+
+            var dicomDirectory = parent as DicomDirectory;
+            if (dicomDirectory != null)
+            {
+                dicomDirectory.RootDirectoryRecord = dicomDirectory.RootDirectoryRecord.NextDirectoryRecord;
+                return;
+            }
+
+            throw new Exception("Unsupported object type!");
         }
 
         #endregion
